@@ -1,6 +1,5 @@
-use std::collections::{BTreeMap, HashMap, btree_map::Entry};
+use std::{collections::{BTreeMap, HashMap, btree_map::Entry}, time::Instant};
 use anyhow::anyhow;
-use tracing::instrument;
 use crate::order_book::types::{BookDepth, EngineCancelOrder, EngineModifyOrder, ModifyOutcome, OrderNode, PriceLevel, PriceLevelDepth};
 
 #[derive(Debug)]
@@ -13,16 +12,7 @@ impl OrderBook {
         Self { ask : HalfBook::new(), bid : HalfBook::new() }
     }
 
-    #[instrument( // used for auto span creation & drop.
-        name = "create_buy_order",
-        skip(self),
-        fields(
-            order_id = %order_id,
-            price = resting_order.market_limit
-        ),
-        err
-    )]
-    pub fn create_buy_order(&mut self, order_id : u64, resting_order : OrderNode) -> Result<usize, anyhow::Error>{
+    pub fn create_buy_order(&mut self, resting_order : OrderNode) -> Result<usize, anyhow::Error>{
         
         let mut order = resting_order;
         let order_quantity = order.current_quantity;
@@ -96,16 +86,7 @@ impl OrderBook {
         Ok(new_index)
     }
 
-    #[instrument( 
-        name = "create_sell_order",
-        skip(self),
-        fields(
-            order_id = %order_id,
-            price = resting_order.market_limit 
-        ),
-        err
-    )]
-    pub fn create_sell_order(&mut self, order_id : u64, resting_order : OrderNode) -> Result<usize, anyhow::Error>{
+    pub fn create_sell_order(&mut self, resting_order : OrderNode) -> Result<usize, anyhow::Error>{
         let mut order = resting_order;
         let order_quantity = order.current_quantity;
         let price = order.market_limit;
@@ -178,14 +159,6 @@ impl OrderBook {
         Ok(new_index)
     }
 
-    #[instrument( 
-        name = "cancel_order",
-        skip(self),
-        fields(
-            order_id = %order_id
-        ),
-        err
-    )]
     pub fn cancel_order(&mut self, order_id : u64, order : EngineCancelOrder) -> Result<(), anyhow::Error>{
         if order.is_buy_side {
             let existing_index = self.bid.order_registry.get(&order_id);
@@ -380,14 +353,6 @@ impl OrderBook {
         }
     }
 
-    #[instrument( 
-        name = "modify_order",
-        skip(self),
-        fields(
-            order_id = %order_id,
-        ),
-        err
-    )]
     pub fn modify_order(&mut self, order_id : u64, order : EngineModifyOrder) -> Result<Option<ModifyOutcome>, anyhow::Error>{
         if order.is_buy_side{
             let existing_index = self.bid.order_registry.get(&order_id);
@@ -485,12 +450,8 @@ impl OrderBook {
         }
     }
     
-    #[instrument( 
-        name = "book_depth",
-        skip(self),
-        err
-    )]
     pub fn depth(&self, levels_count : Option<u32>) -> Result<BookDepth, anyhow::Error>{
+        let timer = Instant::now();
 
         let ask_iter = self.ask.price_map.iter().rev();
         let bid_iter = self.bid.price_map.iter();
@@ -519,7 +480,8 @@ impl OrderBook {
                 quantity : price_level.total_quantity
             }).collect()
         };
-        Ok(BookDepth { bid_depth, ask_depth })
+        let elapsed_time = timer.elapsed().as_micros() as f64;
+        Ok(BookDepth { bid_depth, ask_depth, timer : elapsed_time })
     }
 }
 

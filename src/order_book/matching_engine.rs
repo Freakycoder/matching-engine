@@ -4,8 +4,7 @@ use crate::order_book::{
     }
 };
 use anyhow::{Context, anyhow};
-use std::collections::HashMap;
-use tracing::{Span};
+use std::{collections::HashMap, time::Instant};
 
 #[derive(Debug)]
 pub struct MatchingEngine {
@@ -36,9 +35,7 @@ impl MatchingEngine {
         new_price: Option<u32>,
         new_qty: Option<u32>,
         is_buy_side : bool,
-        span: &Span,
     ) -> Result< &'static str, anyhow::Error> {
-        let _gaurd = span.enter();
         let orderbook = self
             .get_orderbook(security_id)
             .context("Could not find the orderbook")?;
@@ -59,7 +56,6 @@ impl MatchingEngine {
                         new_initial_qty,
                         old_current_qty,
                     } => {
-                        span.record("modify_outcome", "price & qty");
                         let _ = self.match_order(
                             EngineNewOrder {
                                 engine_order_id: order_id,
@@ -69,13 +65,11 @@ impl MatchingEngine {
                                 is_buy_side,
                                 security_id,
                                 order_type: OrderType::Limit,
-                            },
-                        span);
+                            });
                         return Ok("Both")
                     },
                     ModifyOutcome::Repriced { new_price, old_initial_qty, old_current_qty } => 
                         {
-                        span.record("modify_outcome", "price");
                             let _ = self.match_order(
                             EngineNewOrder {
                                 engine_order_id: order_id,
@@ -85,8 +79,7 @@ impl MatchingEngine {
                                 is_buy_side,
                                 security_id,
                                 order_type: OrderType::Limit,
-                            },
-                        span);
+                            });
                         return Ok("Repriced")
                     },
                     ModifyOutcome::Requantized { old_price, new_initial_qty, old_current_qty } => {
@@ -99,11 +92,10 @@ impl MatchingEngine {
                                 is_buy_side,
                                 security_id,
                                 order_type: OrderType::Limit,
-                            }, span);
+                            });
                             return Ok("Requantized")
                     },
                     ModifyOutcome::Inplace => {
-                        span.record("modify_outcome", "qty reduction");
                         return Ok("Inplace")
                     }
                 }
@@ -114,40 +106,35 @@ impl MatchingEngine {
         }
     }
 
-    pub fn cancel(&mut self, order_id: u64,security_id : u32, span: &Span, is_buy_side : bool) -> Result<CancelOutcome, anyhow::Error>{
+    pub fn cancel(&mut self, order_id: u64,security_id : u32, is_buy_side : bool) -> Result<CancelOutcome, anyhow::Error>{
+        
+        let timer = Instant::now();
         let orderbook = self
             .get_orderbook(security_id)
             .context("Could not find the orderbook")?;
         if let Err(_) = orderbook.cancel_order(order_id, EngineCancelOrder{is_buy_side,security_id, order_id}){
-            span.record("reason", "orderbook cancellation failed");
-            span.record("success_status", false);
             return Ok(CancelOutcome::Failed);
         }; 
-        span.record("success_status", true);
-        return Ok(CancelOutcome::Success);
+        let elapsed_time = timer.elapsed().as_micros() as f64;
+        return Ok(CancelOutcome::Success(elapsed_time));
     }
 
-    pub fn depth(&self, security_id : u32, levels_count :Option<u32>, span: &Span ) -> Result<BookDepth, anyhow::Error>{
-        let _gaurd = span.enter();
-        span.record("security_id", security_id.to_string());
+    pub fn depth(&self, security_id : u32, levels_count :Option<u32> ) -> Result<BookDepth, anyhow::Error>{
+        
         let Some(order_book) = self._book.get(&security_id) else {
-            span.record("status", "failed");
-            span.record("reason", "orderbook doesn't exist");
-            return Err(anyhow!(""))
+            return Err(anyhow!("orderbook doesn't exist"))
         };
         match order_book.depth(levels_count){
             Ok(book_depth) => {
-                span.record("status", "success");
-                span.record("reason", "None");
                 Ok(book_depth)
             },
             Err(e) => Err(anyhow!("{}", e))
         }
     }
 
-    pub fn match_order(&mut self, order: EngineNewOrder, span: &Span) -> Result<MatchOutcome, anyhow::Error> {
+    pub fn match_order(&mut self, order: EngineNewOrder) -> Result<MatchOutcome, anyhow::Error> {
         
-        let _gaurd = span.enter();
+        let timer = Instant::now();
 
         let orderbook = match self._book.get_mut(&order.security_id){
             Some(orderbook) => {
@@ -190,7 +177,6 @@ impl MatchingEngine {
                                                 if let Some(next_order_idx) = next {
                                                     price_level.head = Some(next_order_idx);
                                                 } else {
-                                                    span.record("reason", "exhausted");
                                                     price_level.total_quantity = 0;
                                                     price_level.head = None;
                                                     price_level.tail = None;
@@ -202,7 +188,6 @@ impl MatchingEngine {
                                                 price_level.total_quantity = price_level.total_quantity.checked_sub(fill_quantity).ok_or(anyhow!("error occured subtracting fntq - fq"))?;
                                                 fill_quantity = 0;
                                                 orders_touched += 1;
-                                                span.record("filled", true);
                                             }
                                         }
                                         None => {
@@ -227,14 +212,12 @@ impl MatchingEngine {
                             };
                         }
                     }
-                    span.record("order_type", "market");
-                    span.record("is_buy_side", false);
-                    span.record("levels_consumed", levels_consumed);
-                    span.record("orders_touched", orders_touched);
+                    let elapsed_time = timer.elapsed().as_micros() as f64;
                     Ok(MatchOutcome{
                         order_index : None,
                         levels_consumed,
-                        orders_touched
+                        orders_touched,
+                        timer : elapsed_time
                     })
                 }
                 OrderType::Market(market_limit) => {
@@ -275,7 +258,6 @@ impl MatchingEngine {
                                                 if let Some(next_order_idx) = next {
                                                     price_level.head = Some(next_order_idx);
                                                 } else {
-                                                    span.record("reason", "exhausted");
                                                     price_level.total_quantity = 0;
                                                     price_level.head = None;
                                                     price_level.tail = None;
@@ -287,7 +269,6 @@ impl MatchingEngine {
                                                 price_level.total_quantity = price_level.total_quantity.checked_sub(fill_quantity).ok_or(anyhow!("error occured subtracting fntq - fq"))?;
                                                 fill_quantity = 0;
                                                 orders_touched += 1;
-                                                span.record("filled", true);
                                             }
                                         }
                                         None => {
@@ -311,14 +292,12 @@ impl MatchingEngine {
                             };
                         }
                     }
-                    span.record("order_type", "market");
-                    span.record("is_buy_side", false);
-                    span.record("levels_consumed", levels_consumed);
-                    span.record("orders_touched", orders_touched);
+                    let elapsed_time = timer.elapsed().as_micros() as f64;
                     Ok(MatchOutcome{
                         order_index : None,
                         levels_consumed,
-                        orders_touched
+                        orders_touched,
+                        timer : elapsed_time
                     })
                 }
                 OrderType::Limit => {
@@ -357,7 +336,6 @@ impl MatchingEngine {
                                         if let Some(next_order_idx) = next {
                                             price_level.head = Some(next_order_idx);
                                         } else {
-                                            span.record("reason", "partially_filled");
                                             price_level.total_quantity = 0;
                                             price_level.head = None;
                                             price_level.tail = None;
@@ -369,7 +347,6 @@ impl MatchingEngine {
                                         price_level.total_quantity = price_level.total_quantity.checked_sub(fill_quantity).ok_or(anyhow!("error occured subtracting fntq - fq"))?;
                                         fill_quantity = 0;
                                         orders_touched += 1;
-                                        span.record("filled", true);
                                     }
                                         }
                                         None => {
@@ -395,7 +372,6 @@ impl MatchingEngine {
                     }
                     if fill_quantity > 0 {
                         let alloted_index = orderbook.create_sell_order(
-                            order.engine_order_id,
                             OrderNode {
                                 order_id : order.engine_order_id,
                                 initial_quantity: order.initial_quantity,
@@ -405,20 +381,20 @@ impl MatchingEngine {
                                 prev: None,
                             },
                         )?;
-                        span.record("order_type", "limit");
-                        span.record("is_buy_side", false);
-                        span.record("levels_consumed", levels_consumed);
-                        span.record("orders_touched", orders_touched);
+                        let elapsed_time = timer.elapsed().as_micros() as f64;
                         return Ok(MatchOutcome{
                         order_index : Some(alloted_index as u32),
                         levels_consumed,
-                        orders_touched
+                        orders_touched,
+                        timer : elapsed_time
                     })
                     }
+                    let elapsed_time = timer.elapsed().as_micros() as f64;
                     Ok(MatchOutcome{
                         order_index : None,
                         levels_consumed,
-                        orders_touched
+                        orders_touched,
+                        timer : elapsed_time
                     })
                 }
             }
@@ -451,7 +427,6 @@ impl MatchingEngine {
                                                 if let Some(next_order_idx) = next {
                                                     price_level.head = Some(next_order_idx);
                                                 } else {
-                                                    span.record("reason", "exhausted");
                                                     price_level.total_quantity = 0;
                                                     price_level.head = None;
                                                     price_level.tail = None;
@@ -463,7 +438,6 @@ impl MatchingEngine {
                                                 price_level.total_quantity = price_level.total_quantity.checked_sub(fill_quantity).ok_or(anyhow!("error occured subtracting fntq - fq"))?;
                                                 fill_quantity = 0;
                                                 orders_touched += 1;
-                                                span.record("filled", true);
                                             }
                                         }
                                         None => {
@@ -488,14 +462,12 @@ impl MatchingEngine {
                             };
                         }
                     }
-                    span.record("order_type", "market");
-                    span.record("is_buy_side", true);
-                    span.record("levels_consumed", levels_consumed);
-                    span.record("orders_touched", orders_touched);
+                    let elapsed_time = timer.elapsed().as_micros() as f64;
                     Ok(MatchOutcome{
                         order_index : None,
                         levels_consumed,
-                        orders_touched
+                        orders_touched,
+                        timer : elapsed_time
                     })
                 }
                 OrderType::Market(market_limit) => {
@@ -536,7 +508,6 @@ impl MatchingEngine {
                                                 if let Some(next_order_idx) = next {
                                                     price_level.head = Some(next_order_idx);
                                                 } else {
-                                                    span.record("reason", "exhausted");
                                                     price_level.head = None;
                                                     price_level.total_quantity = 0;
                                                     price_level.head = None;
@@ -549,7 +520,6 @@ impl MatchingEngine {
                                                 price_level.total_quantity = price_level.total_quantity.checked_sub(fill_quantity).ok_or(anyhow!("error occured subtracting fntq - fq"))?;
                                                 fill_quantity = 0;
                                                 orders_touched += 1;
-                                                span.record("filled", true);
                                             }
                                         }
                                         None => {
@@ -574,14 +544,12 @@ impl MatchingEngine {
                             };
                         }
                     }
-                    span.record("order_type", "market");
-                    span.record("is_buy_side", true);
-                    span.record("levels_consumed", levels_consumed);
-                    span.record("orders_touched", orders_touched);
+                    let elapsed_time = timer.elapsed().as_micros() as f64;
                     Ok(MatchOutcome{
                         order_index : None,
                         levels_consumed,
-                        orders_touched
+                        orders_touched,
+                        timer : elapsed_time
                     })
                 }
                 OrderType::Limit => {
@@ -622,7 +590,6 @@ impl MatchingEngine {
                                                 if let Some(next_order_idx) = next {
                                                     price_level.head = Some(next_order_idx);
                                                 } else {
-                                                    span.record("reason", "partially_filled");
                                                     price_level.total_quantity = 0;
                                                     price_level.head = None;
                                                     price_level.tail = None;
@@ -634,7 +601,6 @@ impl MatchingEngine {
                                                 price_level.total_quantity = price_level.total_quantity.checked_sub(fill_quantity).ok_or(anyhow!("error occured subtracting fntq - fq"))?;
                                                 fill_quantity = 0;
                                                 orders_touched += 1;
-                                                span.record("filled", true);
                                             }
                                         }
                                         None => {
@@ -660,7 +626,6 @@ impl MatchingEngine {
                     }
                     if fill_quantity > 0{
                         let alloted_index = orderbook.create_buy_order(
-                            order.engine_order_id,
                             OrderNode {
                                 order_id : order.engine_order_id,
                                 initial_quantity: order.initial_quantity,
@@ -670,20 +635,20 @@ impl MatchingEngine {
                                 prev: None,
                             },
                         )?;
-                        span.record("order_type", "limit");
-                        span.record("is_buy_side", true);
-                        span.record("levels_consumed", levels_consumed);
-                        span.record("orders_touched", orders_touched);
+                        let elapsed_time = timer.elapsed().as_micros() as f64;
                         return Ok(MatchOutcome{
                         order_index : Some(alloted_index as u32),
                         levels_consumed,
-                        orders_touched
+                        orders_touched,
+                        timer : elapsed_time
                     })
                     }
+                    let elapsed_time = timer.elapsed().as_micros() as f64;
                     Ok(MatchOutcome{
                         order_index : None,
                         levels_consumed,
-                        orders_touched
+                        orders_touched,
+                        timer : elapsed_time
                     })
                 }
             }

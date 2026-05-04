@@ -80,6 +80,7 @@ pub struct MatchOutcome {
     pub order_index: Option<u32>,
     pub orders_touched: u32,
     pub levels_consumed: u32,
+    pub timer : f64
 }
 
 #[derive(Debug)]
@@ -104,14 +105,15 @@ pub enum ModifyOutcome{
 
 #[derive(Debug)]
 pub enum CancelOutcome {
-    Success,
+    Success(f64),
     Failed
 }
 
 #[derive(Debug)]
 pub struct BookDepth{
     pub bid_depth : Vec<PriceLevelDepth>,
-    pub ask_depth : Vec<PriceLevelDepth>
+    pub ask_depth : Vec<PriceLevelDepth>,
+    pub timer : f64
 }
 
 #[derive(Debug)]
