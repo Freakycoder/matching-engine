@@ -113,7 +113,8 @@ impl MatchingEngine {
             .get_orderbook(security_id)
             .context("Could not find the orderbook")?;
         if let Err(_) = orderbook.cancel_order(order_id, EngineCancelOrder{is_buy_side,security_id, order_id}){
-            return Ok(CancelOutcome::Failed);
+            let elapsed_time = timer.elapsed().as_micros() as f64;
+            return Ok(CancelOutcome::Failed(elapsed_time));
         }; 
         let elapsed_time = timer.elapsed().as_micros() as f64;
         return Ok(CancelOutcome::Success(elapsed_time));
