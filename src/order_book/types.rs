@@ -24,8 +24,10 @@ pub struct EngineNewOrder{
 
 #[derive(Debug)]
 pub enum OrderType{
-    Market(Option<u32>), // No cieling/floor price. leftover quantity is canceled
-    Limit
+    Market,
+    GoodTillCancel, // limit order essentially
+    ImmediateOrCancel(u32), // No cieling/floor price. leftover quantity is canceled
+    FillOrKill(u32)
 }
 
 #[derive(Debug)]
