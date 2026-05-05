@@ -106,7 +106,7 @@ pub enum ModifyOutcome{
 #[derive(Debug)]
 pub enum CancelOutcome {
     Success(f64),
-    Failed
+    Failed(f64)
 }
 
 #[derive(Debug)]
