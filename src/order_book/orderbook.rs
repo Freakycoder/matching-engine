@@ -1,6 +1,5 @@
 use std::{collections::{BTreeMap, HashMap, btree_map::Entry}, time::Instant};
-use anyhow::anyhow;
-use crate::order_book::types::{BookDepth, EngineCancelOrder, EngineModifyOrder, ModifyOutcome, OrderNode, PriceLevel, PriceLevelDepth};
+use crate::order_book::types::{BookDepth, EngineCancelOrder, EngineModifyOrder, ModifyOutcome, OrderBookError, OrderNode, PriceLevel, PriceLevelDepth};
 
 #[derive(Debug)]
 pub struct OrderBook{
@@ -12,7 +11,7 @@ impl OrderBook {
         Self { ask : HalfBook::new(), bid : HalfBook::new() }
     }
 
-    pub fn create_buy_order(&mut self, resting_order : OrderNode) -> Result<usize, anyhow::Error>{
+    pub fn create_buy_order(&mut self, resting_order : OrderNode) -> Result<usize, OrderBookError>{
         
         let mut order = resting_order;
         let order_quantity = order.current_quantity;
@@ -86,7 +85,7 @@ impl OrderBook {
         Ok(new_index)
     }
 
-    pub fn create_sell_order(&mut self, resting_order : OrderNode) -> Result<usize, anyhow::Error>{
+    pub fn create_sell_order(&mut self, resting_order : OrderNode) -> Result<usize, OrderBookError>{
         let mut order = resting_order;
         let order_quantity = order.current_quantity;
         let price = order.market_limit;
@@ -159,11 +158,11 @@ impl OrderBook {
         Ok(new_index)
     }
 
-    pub fn cancel_order(&mut self, order_id : u64, order : EngineCancelOrder) -> Result<(), anyhow::Error>{
+    pub fn cancel_order(&mut self, order_id : u64, order : EngineCancelOrder) -> Result<(), OrderBookError>{
         if order.is_buy_side {
             let existing_index = self.bid.order_registry.get(&order_id);
             if existing_index.is_none(){
-                return Err(anyhow!("index for the order doesn't exist in the local registry"));
+                return Err(OrderBookError::OrderNotFound);
             }
                             let (prev, next, old_price, old_quantity) = {
                                 match self.bid.order_pool[*existing_index.unwrap()].as_ref(){
@@ -171,7 +170,7 @@ impl OrderBook {
                                         (node.prev, node.next, node.market_limit, node.current_quantity)
                                     }
                                     None => { 
-                                        return Err(anyhow!("order node doesn't exist at index for cancellation"));
+                                        return Err(OrderBookError::OrderNotFound);
                                     }
                                 }
                             };
@@ -182,8 +181,8 @@ impl OrderBook {
                                 self.bid.order_pool[*existing_index.unwrap()] = None;
                                 price_level.head = None;
                                 price_level.tail = None;
-                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| anyhow!("error in subtracting total qty in order cancellation"))?;
-                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| anyhow!("error is subtracting order qty in cancellation"))?;
+                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| OrderBookError::QuantityUnderflow)?;
+                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                 self.bid.free_list.push(*existing_index.unwrap());
                                 return Ok(());
                             }
@@ -196,12 +195,12 @@ impl OrderBook {
                                         }           
                                     }
                                 self.bid.order_pool[*existing_index.unwrap()] = None;
-                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| anyhow!("error in subtracting total qty in order cancellation"))?;
-                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| anyhow!("error is subtracting order qty in cancellation"))?;
+                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| OrderBookError::QuantityUnderflow)?;
+                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                 self.bid.free_list.push(*existing_index.unwrap());
                                 return Ok(()); 
                                 } else {
-                                    return Err(anyhow!("no prev node found for deletion of tail node"));
+                                    return Err(OrderBookError::PrevNotFound);
                                 }
                             }
                             else if *existing_index.unwrap() == price_level.head.unwrap() {
@@ -213,12 +212,12 @@ impl OrderBook {
                                         }
                                     }
                                     self.bid.order_pool[*existing_index.unwrap()] = None;
-                                    price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| anyhow!("error in subtracting total qty in order cancellation"))?;
-                                    price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| anyhow!("error is subtracting order qty in cancellation"))?;
+                                    price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| OrderBookError::QuantityUnderflow)?;
+                                    price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                     self.bid.free_list.push(*existing_index.unwrap());
                                     return Ok(());
                                 } else {
-                                    return Err(anyhow!("no next node found for deletion of head node"));
+                                    return Err(OrderBookError::NextNotFound);
                                 }                    
                             }
                             else {
@@ -230,7 +229,7 @@ impl OrderBook {
                                     }
                                 }
                                 else {
-                                    return Err(anyhow!("no prev node found for deletion of middle node"));
+                                    return Err(OrderBookError::PrevNotFound);
                                 }
                                 if let Some(next_index) = next{
                                     if let Some(possible_next_node) = self.bid.order_pool.get_mut(next_index){
@@ -240,25 +239,25 @@ impl OrderBook {
                                     }
                                 }
                                 else {
-                                    return Err(anyhow!("no next node found for deletion of middle node"));
+                                    return Err(OrderBookError::NextNotFound);
                                 }
                                 self.bid.order_pool[*existing_index.unwrap()] = None;
-                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| anyhow!("error in subtracting total qty in order cancellation"))?;
-                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| anyhow!("error is subtracting order qty in cancellation"))?;
+                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| OrderBookError::QuantityUnderflow)?;
+                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                 self.bid.free_list.push(*existing_index.unwrap());
                                 return Ok(());
                             }
                         } else {
                             self.bid.price_map.remove(&old_price);
-                            return Err(anyhow::anyhow!("head and tail corrupted so deleted"));
+                            return Err(OrderBookError::HeadTailCorrupted);
                         }
                     } else {
-                        return Err(anyhow!("unable to get old price node to perform cancellation"));
+                        return Err(OrderBookError::NodeNotFound);
                     }
         } else {
             let existing_index = self.ask.order_registry.get(&order_id);
             if existing_index.is_none(){
-                return Err(anyhow!("index for the order doesn't exist in the local registry"));
+                return Err(OrderBookError::OrderNotFound);
             }
                     let (prev, next, old_price, old_quantity) = {
                                 match self.ask.order_pool[*existing_index.unwrap()].as_ref(){
@@ -266,7 +265,7 @@ impl OrderBook {
                                         (node.prev, node.next, node.market_limit, node.current_quantity)
                                     }
                                     None => {
-                                        return Err(anyhow!("order node doesn't exist at index for cancellation"));
+                                        return Err(OrderBookError::NodeNotFound);
                                     }
                                 }
                             };
@@ -277,8 +276,8 @@ impl OrderBook {
                                 self.ask.order_pool[*existing_index.unwrap()] = None;
                                 price_level.head = None;
                                 price_level.tail = None;
-                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| anyhow!("error in subtracting total qty in order cancellation"))?;
-                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| anyhow!("error is subtracting order qty in cancellation"))?;
+                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| OrderBookError::QuantityUnderflow)?;
+                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                 self.ask.free_list.push(*existing_index.unwrap());
                                 return Ok(());
                             }
@@ -291,12 +290,12 @@ impl OrderBook {
                                         }           
                                     }
                                 self.ask.order_pool[*existing_index.unwrap()] = None;
-                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| anyhow!("error in subtracting total qty in order cancellation"))?;
-                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| anyhow!("error is subtracting order qty in cancellation"))?;
+                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| OrderBookError::QuantityUnderflow)?;
+                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                 self.ask.free_list.push(*existing_index.unwrap());
                                 return Ok(()); 
                                 } else {
-                                    return Err(anyhow!("no prev node found for deletion of tail node"));
+                                    return Err(OrderBookError::PrevNotFound);
                                 }
                             }
                             else if *existing_index.unwrap() == price_level.head.unwrap() {
@@ -308,12 +307,12 @@ impl OrderBook {
                                         }
                                     }
                                     self.ask.order_pool[*existing_index.unwrap()] = None;
-                                    price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| anyhow!("error in subtracting total qty in order cancellation"))?;
-                                    price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| anyhow!("error is subtracting order qty in cancellation"))?;
+                                    price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| OrderBookError::QuantityUnderflow)?;
+                                    price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                     self.ask.free_list.push(*existing_index.unwrap());
                                     return Ok(());
                                 } else {
-                                    return Err(anyhow!("no next node found for deletion of head node"));
+                                    return Err(OrderBookError::NextNotFound);
                                 }                    
                             }
                             else {
@@ -325,7 +324,7 @@ impl OrderBook {
                                     }
                                 }
                                 else {
-                                    return Err(anyhow!("no prev node found for deletion of middle node"));
+                                    return Err(OrderBookError::PrevNotFound);
                                 }
                                 if let Some(next_index) = next{
                                     if let Some(possible_next_node) = self.ask.order_pool.get_mut(next_index){
@@ -335,29 +334,29 @@ impl OrderBook {
                                     }
                                 }
                                 else {
-                                    return Err(anyhow!("no next node found for deletion of middle node"));
+                                    return Err(OrderBookError::NextNotFound);
                                 }
                                 self.ask.order_pool[*existing_index.unwrap()] = None;
-                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| anyhow!("error in subtracting total qty in order cancellation"))?;
-                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| anyhow!("error is subtracting order qty in cancellation"))?;
+                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| OrderBookError::QuantityUnderflow)?;
+                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                 self.ask.free_list.push(*existing_index.unwrap());
                                 return Ok(());
                             }
                         } else {
                             self.ask.price_map.remove(&old_price);
-                            return Err(anyhow::anyhow!("head and tail corrupted so deleted"));
+                            return Err(OrderBookError::HeadTailCorrupted);
                         }
                     } else {
-                        return Err(anyhow!("unable to get old price node to perform cancellation"));
+                        return Err(OrderBookError::NodeNotFound);
                     }
         }
     }
 
-    pub fn modify_order(&mut self, order_id : u64, order : EngineModifyOrder) -> Result<Option<ModifyOutcome>, anyhow::Error>{
+    pub fn modify_order(&mut self, order_id : u64, order : EngineModifyOrder) -> Result<Option<ModifyOutcome>, OrderBookError>{
         if order.is_buy_side{
             let existing_index = self.bid.order_registry.get(&order_id);
             if existing_index.is_none(){
-                return Err(anyhow!("index for the order doesn't exist in the local registry"));
+                return Err(OrderBookError::OrderNotFound);
             }
                 let (old_initial_qty, old_current_qty, old_price) = {
                     match self.bid.order_pool[*existing_index.unwrap()].as_ref(){
@@ -365,7 +364,7 @@ impl OrderBook {
                             (node.initial_quantity, node.current_quantity, node.market_limit)
                         }
                         None => {
-                            return Err(anyhow!("order node not found at index for modification (buy)"));
+                            return Err(OrderBookError::NodeNotFound);
                         }
                     }
                 };
@@ -390,7 +389,7 @@ impl OrderBook {
                                 return Ok(Some(ModifyOutcome::Inplace));
                             }
                             None => {
-                                return Err(anyhow!("couldn't find order node to modify qty in-place (buy)"));
+                                return Err(OrderBookError::NodeNotFound);
                             }
                         }
                     }
@@ -403,7 +402,7 @@ impl OrderBook {
         } else {
             let existing_index = self.ask.order_registry.get(&order_id);
             if existing_index.is_none(){
-                return Err(anyhow!("index for the order doesn't exist in the local registry"));
+                return Err(OrderBookError::OrderNotFound);
             }
                 let (old_initial_qty, old_current_qty, old_price) = {
                     match self.ask.order_pool[*existing_index.unwrap()].as_ref(){
@@ -411,7 +410,7 @@ impl OrderBook {
                             (node.initial_quantity, node.current_quantity, node.market_limit)
                         }
                         None => {
-                            return Err(anyhow!("order node not found at index for modification (sell)"));
+                            return Err(OrderBookError::NodeNotFound);
                         }
                     }
                 };
@@ -437,9 +436,9 @@ impl OrderBook {
                                 return Ok(Some(ModifyOutcome::Inplace));
                             }
                             None => {
-                                return Err(anyhow!("couldn't find order node to modify qty in-place (sell)"));
+                                return Err(OrderBookError::NodeNotFound);
                             }
-                        }
+                        }  
                     }
                 }else {
                     if let Ok(_) = self.cancel_order(order_id ,EngineCancelOrder { order_id : order.order_id, security_id : order.security_id, is_buy_side: order.is_buy_side,}){

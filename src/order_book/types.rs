@@ -124,4 +124,18 @@ pub struct PriceLevelDepth{
     pub quantity : u32
 }
 
-
+#[derive(Debug)]
+pub enum OrderBookError {
+    OrderNotFound,
+    NextNotFound,
+    PrevNotFound,
+    NodeNotFound,
+    OrderBookNotFound,
+    QuantityUnderflow,
+    HeadTailCorrupted,
+    SecurityNotFound,
+    HeadNotFound,
+    PriceNotFound,
+    PriceLevelEmpty,
+    UnexpectedReturn
+}

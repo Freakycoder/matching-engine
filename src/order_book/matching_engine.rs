@@ -1,11 +1,10 @@
 use crate::order_book::{
     orderbook::OrderBook,
     types::{
-        BookDepth, CancelOutcome, EngineCancelOrder, EngineModifyOrder, EngineNewOrder,
-        MatchOutcome, ModifyOutcome, OrderNode, OrderType,
+        BookDepth, CancelOutcome, EngineCancelOrder, EngineModifyOrder, EngineNewOrder, MatchOutcome, ModifyOutcome, OrderBookError, OrderNode, OrderType
     },
 };
-use anyhow::{Context, anyhow};
+use anyhow::{anyhow};
 use std::{collections::HashMap, time::Instant};
 
 #[derive(Debug)]
@@ -34,11 +33,14 @@ impl MatchingEngine {
         new_price: Option<u32>,
         new_qty: Option<u32>,
         is_buy_side: bool,
-    ) -> Result<&'static str, anyhow::Error> {
+    ) -> Result<&'static str, OrderBookError> {
         let orderbook = self
-            .get_orderbook(security_id)
-            .context("Could not find the orderbook")?;
-        if let Ok(potential_modfication) = orderbook.modify_order(
+            .get_orderbook(security_id);
+
+        if orderbook.is_none(){
+            return Err(OrderBookError::OrderBookNotFound);
+        }
+        if let Ok(potential_modfication) = orderbook.unwrap().modify_order(
             order_id,
             EngineModifyOrder {
                 order_id,
@@ -112,12 +114,15 @@ impl MatchingEngine {
         order_id: u64,
         security_id: u32,
         is_buy_side: bool,
-    ) -> Result<CancelOutcome, anyhow::Error> {
+    ) -> Result<CancelOutcome, OrderBookError> {
         let timer = Instant::now();
         let orderbook = self
-            .get_orderbook(security_id)
-            .context("Could not find the orderbook")?;
-        if let Err(_) = orderbook.cancel_order(
+            .get_orderbook(security_id);
+
+        if orderbook.is_none(){
+            return Err(OrderBookError::OrderBookNotFound);
+        }
+        if let Err(_) = orderbook.unwrap().cancel_order(
             order_id,
             EngineCancelOrder {
                 is_buy_side,
@@ -138,7 +143,7 @@ impl MatchingEngine {
         levels_count: Option<u32>,
     ) -> Result<BookDepth, anyhow::Error> {
         let Some(order_book) = self._book.get(&security_id) else {
-            return Err(anyhow!("orderbook doesn't exist"));
+            return Err(anyhow!("order not found"));
         };
         match order_book.depth(levels_count) {
             Ok(book_depth) => Ok(book_depth),
@@ -146,7 +151,7 @@ impl MatchingEngine {
         }
     }
 
-    pub fn match_order(&mut self, order: EngineNewOrder) -> Result<MatchOutcome, anyhow::Error> {
+    pub fn match_order(&mut self, order: EngineNewOrder) -> Result<MatchOutcome, OrderBookError> {
         let timer = Instant::now();
 
         let orderbook = match self._book.get_mut(&order.security_id) {
@@ -179,7 +184,7 @@ impl MatchingEngine {
                                             if fill_quantity >= first_order_node.current_quantity {
                                                 fill_quantity -= first_order_node.current_quantity;
 
-                                                price_level.total_quantity = price_level.total_quantity.checked_sub(first_order_node.current_quantity).ok_or(anyhow!("error occured in sub of total qty - current qyt"))?;
+                                                price_level.total_quantity = price_level.total_quantity.checked_sub(first_order_node.current_quantity).ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 let next = first_order_node.next;
                                                 orderbook.bid.order_pool[head_idx] = None;
                                                 orderbook.bid.free_list.push(head_idx);
@@ -198,23 +203,17 @@ impl MatchingEngine {
                                                     first_order_node
                                                         .current_quantity
                                                         .checked_sub(fill_quantity)
-                                                        .ok_or(anyhow!(
-                                                            "error occured subtracting fnq - fq"
-                                                        ))?;
+                                                        .ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 price_level.total_quantity = price_level
                                                     .total_quantity
                                                     .checked_sub(fill_quantity)
-                                                    .ok_or(anyhow!(
-                                                        "error occured subtracting fntq - fq"
-                                                    ))?;
+                                                    .ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 fill_quantity = 0;
                                                 orders_touched += 1;
                                             }
                                         }
                                         None => {
-                                            return Err(anyhow!(
-                                                "failed to get head_idx from order pool"
-                                            ));
+                                            return Err(OrderBookError::HeadNotFound);
                                         }
                                     };
                                 } else {
@@ -265,7 +264,7 @@ impl MatchingEngine {
                                         Some(first_order_node) => {
                                             if fill_quantity >= first_order_node.current_quantity {
                                                 fill_quantity -= first_order_node.current_quantity;
-                                                price_level.total_quantity = price_level.total_quantity.checked_sub(first_order_node.current_quantity).ok_or(anyhow!("error occured in sub of total qty - current qyt"))?;
+                                                price_level.total_quantity = price_level.total_quantity.checked_sub(first_order_node.current_quantity).ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 let next = first_order_node.next;
                                                 orderbook.bid.order_pool[head_idx] = None;
                                                 orderbook.bid.free_list.push(head_idx);
@@ -284,23 +283,17 @@ impl MatchingEngine {
                                                     first_order_node
                                                         .current_quantity
                                                         .checked_sub(fill_quantity)
-                                                        .ok_or(anyhow!(
-                                                            "error occured subtracting fnq - fq"
-                                                        ))?;
+                                                        .ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 price_level.total_quantity = price_level
                                                     .total_quantity
                                                     .checked_sub(fill_quantity)
-                                                    .ok_or(anyhow!(
-                                                        "error occured subtracting fntq - fq"
-                                                    ))?;
+                                                    .ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 fill_quantity = 0;
                                                 orders_touched += 1;
                                             }
                                         }
                                         None => {
-                                            return Err(anyhow!(
-                                                "failed to get head_idx from order pool"
-                                            ));
+                                            return Err(OrderBookError::HeadNotFound);
                                         }
                                     };
                                 } else {
@@ -346,9 +339,7 @@ impl MatchingEngine {
                                     }
                                 }
                                 None => {
-                                    return Err(anyhow!(
-                                        "did not recieve price for limit order (SELL)"
-                                    ));
+                                    return Err(OrderBookError::PriceNotFound);
                                 }
                             }
                             let price_level = price_node.get_mut();
@@ -358,7 +349,7 @@ impl MatchingEngine {
                                         Some(first_order_node) => {
                                             if fill_quantity >= first_order_node.current_quantity {
                                                 fill_quantity -= first_order_node.current_quantity;
-                                                price_level.total_quantity = price_level.total_quantity.checked_sub(first_order_node.current_quantity).ok_or(anyhow!("error occured in sub of total qty - current qyt"))?;
+                                                price_level.total_quantity = price_level.total_quantity.checked_sub(first_order_node.current_quantity).ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 let next = first_order_node.next;
                                                 orderbook.bid.order_pool[head_idx] = None;
                                                 orderbook.bid.free_list.push(head_idx);
@@ -377,23 +368,17 @@ impl MatchingEngine {
                                                     first_order_node
                                                         .current_quantity
                                                         .checked_sub(fill_quantity)
-                                                        .ok_or(anyhow!(
-                                                            "error occured subtracting fnq - fq"
-                                                        ))?;
+                                                        .ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 price_level.total_quantity = price_level
                                                     .total_quantity
                                                     .checked_sub(fill_quantity)
-                                                    .ok_or(anyhow!(
-                                                        "error occured subtracting fntq - fq"
-                                                    ))?;
+                                                    .ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 fill_quantity = 0;
                                                 orders_touched += 1;
                                             }
                                         }
                                         None => {
-                                            return Err(anyhow!(
-                                                "failed to get head_idx from order pool"
-                                            ));
+                                            return Err(OrderBookError::HeadNotFound);
                                         }
                                     };
                                 } else {
@@ -439,7 +424,6 @@ impl MatchingEngine {
                     })
                 }
                 OrderType::FillOrKill(limit_price) => {
-                    // PASS 1 — read-only availability check
                     let mut available_quantity: u32 = 0;
                     for (level_price, level) in orderbook.bid.price_map.iter().rev() {
                         if limit_price > *level_price {
@@ -448,14 +432,13 @@ impl MatchingEngine {
                         available_quantity =
                             available_quantity
                                 .checked_add(level.total_quantity)
-                                .ok_or(anyhow!("overflow during FOK availability check"))?;
+                                .ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                         if available_quantity >= order.initial_quantity {
                             break;
                         }
                     }
 
                     if available_quantity < order.initial_quantity {
-                        // KILL — insufficient liquidity, reject without touching the book
                         let elapsed_time = timer.elapsed().as_micros() as f64;
                         return Ok(MatchOutcome {
                             order_index: None,
@@ -465,7 +448,6 @@ impl MatchingEngine {
                         });
                     }
 
-                    // PASS 2 — guaranteed to fully fill, execute now
                     let mut fill_quantity = order.initial_quantity;
                     let mut levels_consumed = 0;
                     let mut orders_touched = 0;
@@ -474,13 +456,11 @@ impl MatchingEngine {
                         let remove_node: bool;
                         {
                             let Some(mut price_node) = orderbook.bid.price_map.last_entry() else {
-                                return Err(anyhow!(
-                                    "FOK pass 2 ran out of liquidity unexpectedly"
-                                ));
+                                return Err(OrderBookError::PriceLevelEmpty);
                             };
 
                             if limit_price > *price_node.key() {
-                                return Err(anyhow!("FOK pass 2 hit price limit unexpectedly"));
+                                return Err(OrderBookError::UnexpectedReturn);
                             }
 
                             let price_level = price_node.get_mut();
@@ -493,9 +473,7 @@ impl MatchingEngine {
                                                 price_level.total_quantity = price_level
                                                     .total_quantity
                                                     .checked_sub(first_order_node.current_quantity)
-                                                    .ok_or(anyhow!(
-                                                        "underflow in total_qty - current_qty"
-                                                    ))?;
+                                                    .ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 let next = first_order_node.next;
                                                 orderbook.bid.order_pool[head_idx] = None;
                                                 orderbook.bid.free_list.push(head_idx);
@@ -514,23 +492,17 @@ impl MatchingEngine {
                                                     first_order_node
                                                         .current_quantity
                                                         .checked_sub(fill_quantity)
-                                                        .ok_or(anyhow!(
-                                                            "underflow in current_qty - fill_qty"
-                                                        ))?;
+                                                        .ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 price_level.total_quantity = price_level
                                                     .total_quantity
                                                     .checked_sub(fill_quantity)
-                                                    .ok_or(anyhow!(
-                                                        "underflow in total_qty - fill_qty"
-                                                    ))?;
+                                                    .ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 fill_quantity = 0;
                                                 orders_touched += 1;
                                             }
                                         }
                                         None => {
-                                            return Err(anyhow!(
-                                                "failed to get head_idx from order pool"
-                                            ));
+                                            return Err(OrderBookError::HeadNotFound);
                                         }
                                     };
                                 } else {
@@ -574,7 +546,7 @@ impl MatchingEngine {
                                         Some(first_order_node) => {
                                             if fill_quantity >= first_order_node.current_quantity {
                                                 fill_quantity -= first_order_node.current_quantity;
-                                                price_level.total_quantity = price_level.total_quantity.checked_sub(first_order_node.current_quantity).ok_or(anyhow!("error occured in sub of total qty - current qyt"))?;
+                                                price_level.total_quantity = price_level.total_quantity.checked_sub(first_order_node.current_quantity).ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 let next = first_order_node.next;
                                                 orderbook.ask.order_pool[head_idx] = None;
                                                 orderbook.ask.free_list.push(head_idx);
@@ -593,23 +565,17 @@ impl MatchingEngine {
                                                     first_order_node
                                                         .current_quantity
                                                         .checked_sub(fill_quantity)
-                                                        .ok_or(anyhow!(
-                                                            "error occured subtracting fnq - fq"
-                                                        ))?;
+                                                        .ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 price_level.total_quantity = price_level
                                                     .total_quantity
                                                     .checked_sub(fill_quantity)
-                                                    .ok_or(anyhow!(
-                                                        "error occured subtracting fntq - fq"
-                                                    ))?;
+                                                    .ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 fill_quantity = 0;
                                                 orders_touched += 1;
                                             }
                                         }
                                         None => {
-                                            return Err(anyhow!(
-                                                "failed to get head_idx from order pool"
-                                            ));
+                                            return Err(OrderBookError::HeadNotFound);
                                         }
                                     };
                                 } else {
@@ -659,7 +625,7 @@ impl MatchingEngine {
                                         Some(first_order_node) => {
                                             if fill_quantity >= first_order_node.current_quantity {
                                                 fill_quantity -= first_order_node.current_quantity;
-                                                price_level.total_quantity = price_level.total_quantity.checked_sub(first_order_node.current_quantity).ok_or(anyhow!("error occured in sub of total qty - current qyt"))?;
+                                                price_level.total_quantity = price_level.total_quantity.checked_sub(first_order_node.current_quantity).ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 let next = first_order_node.next;
                                                 orderbook.ask.order_pool[head_idx] = None;
                                                 orderbook.ask.free_list.push(head_idx);
@@ -679,23 +645,17 @@ impl MatchingEngine {
                                                     first_order_node
                                                         .current_quantity
                                                         .checked_sub(fill_quantity)
-                                                        .ok_or(anyhow!(
-                                                            "error occured subtracting fnq - fq"
-                                                        ))?;
+                                                        .ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 price_level.total_quantity = price_level
                                                     .total_quantity
                                                     .checked_sub(fill_quantity)
-                                                    .ok_or(anyhow!(
-                                                        "error occured subtracting fntq - fq"
-                                                    ))?;
+                                                    .ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 fill_quantity = 0;
                                                 orders_touched += 1;
                                             }
                                         }
                                         None => {
-                                            return Err(anyhow!(
-                                                "failed to get head_idx from order pool"
-                                            ));
+                                            return Err(OrderBookError::HeadNotFound);
                                         }
                                     };
                                 } else {
@@ -741,7 +701,7 @@ impl MatchingEngine {
                                     }
                                 }
                                 None => {
-                                    return Err(anyhow!("did not recieve price for limit(BUY)"));
+                                    return Err(OrderBookError::PriceNotFound);
                                 }
                             }
                             let price_level = price_node.get_mut();
@@ -751,7 +711,7 @@ impl MatchingEngine {
                                         Some(first_order_node) => {
                                             if fill_quantity >= first_order_node.current_quantity {
                                                 fill_quantity -= first_order_node.current_quantity;
-                                                price_level.total_quantity = price_level.total_quantity.checked_sub(first_order_node.current_quantity).ok_or(anyhow!("error occured in sub of total qty - current qyt"))?;
+                                                price_level.total_quantity = price_level.total_quantity.checked_sub(first_order_node.current_quantity).ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 let next = first_order_node.next;
                                                 orderbook.ask.order_pool[head_idx] = None;
                                                 orderbook.ask.free_list.push(head_idx);
@@ -770,23 +730,17 @@ impl MatchingEngine {
                                                     first_order_node
                                                         .current_quantity
                                                         .checked_sub(fill_quantity)
-                                                        .ok_or(anyhow!(
-                                                            "error occured subtracting fnq - fq"
-                                                        ))?;
+                                                        .ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 price_level.total_quantity = price_level
                                                     .total_quantity
                                                     .checked_sub(fill_quantity)
-                                                    .ok_or(anyhow!(
-                                                        "error occured subtracting fntq - fq"
-                                                    ))?;
+                                                    .ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 fill_quantity = 0;
                                                 orders_touched += 1;
                                             }
                                         }
                                         None => {
-                                            return Err(anyhow!(
-                                                "failed to get head_idx from order pool"
-                                            ));
+                                            return Err(OrderBookError::HeadNotFound);
                                         }
                                     };
                                 } else {
@@ -815,6 +769,7 @@ impl MatchingEngine {
                             next: None,
                             prev: None,
                         })?;
+
                         let elapsed_time = timer.elapsed().as_micros() as f64;
                         return Ok(MatchOutcome {
                             order_index: Some(alloted_index as u32),
@@ -832,7 +787,6 @@ impl MatchingEngine {
                     })
                 }
                 OrderType::FillOrKill(limit_price) => {
-                    // PASS 1 — read-only availability check
                     let mut available_quantity: u32 = 0;
                     for (level_price, level) in orderbook.ask.price_map.iter() {
                         if limit_price < *level_price {
@@ -841,14 +795,13 @@ impl MatchingEngine {
                         available_quantity =
                             available_quantity
                                 .checked_add(level.total_quantity)
-                                .ok_or(anyhow!("overflow during FOK availability check"))?;
+                                .ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                         if available_quantity >= order.initial_quantity {
                             break;
                         }
                     }
 
                     if available_quantity < order.initial_quantity {
-                        // KILL — insufficient liquidity, reject without touching the book
                         let elapsed_time = timer.elapsed().as_micros() as f64;
                         return Ok(MatchOutcome {
                             order_index: None,
@@ -858,7 +811,6 @@ impl MatchingEngine {
                         });
                     }
 
-                    // PASS 2 — guaranteed to fully fill, execute now
                     let mut fill_quantity = order.initial_quantity;
                     let mut levels_consumed = 0;
                     let mut orders_touched = 0;
@@ -867,13 +819,11 @@ impl MatchingEngine {
                         let remove_node: bool;
                         {
                             let Some(mut price_node) = orderbook.ask.price_map.first_entry() else {
-                                return Err(anyhow!(
-                                    "FOK pass 2 ran out of liquidity unexpectedly"
-                                ));
+                                return Err(OrderBookError::PriceLevelEmpty);
                             };
 
                             if limit_price < *price_node.key() {
-                                return Err(anyhow!("FOK pass 2 hit price limit unexpectedly"));
+                                return Err(OrderBookError::UnexpectedReturn);
                             }
 
                             let price_level = price_node.get_mut();
@@ -886,9 +836,7 @@ impl MatchingEngine {
                                                 price_level.total_quantity = price_level
                                                     .total_quantity
                                                     .checked_sub(first_order_node.current_quantity)
-                                                    .ok_or(anyhow!(
-                                                        "underflow in total_qty - current_qty"
-                                                    ))?;
+                                                    .ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 let next = first_order_node.next;
                                                 orderbook.ask.order_pool[head_idx] = None;
                                                 orderbook.ask.free_list.push(head_idx);
@@ -907,23 +855,17 @@ impl MatchingEngine {
                                                     first_order_node
                                                         .current_quantity
                                                         .checked_sub(fill_quantity)
-                                                        .ok_or(anyhow!(
-                                                            "underflow in current_qty - fill_qty"
-                                                        ))?;
+                                                        .ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 price_level.total_quantity = price_level
                                                     .total_quantity
                                                     .checked_sub(fill_quantity)
-                                                    .ok_or(anyhow!(
-                                                        "underflow in total_qty - fill_qty"
-                                                    ))?;
+                                                    .ok_or_else(|| OrderBookError::QuantityUnderflow)?;
                                                 fill_quantity = 0;
                                                 orders_touched += 1;
                                             }
                                         }
                                         None => {
-                                            return Err(anyhow!(
-                                                "failed to get head_idx from order pool"
-                                            ));
+                                            return Err(OrderBookError::HeadNotFound);
                                         }
                                     };
                                 } else {
