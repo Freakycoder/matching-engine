@@ -182,8 +182,8 @@ impl OrderBook {
                                 self.bid.order_pool[*existing_index.unwrap()] = None;
                                 price_level.head = None;
                                 price_level.tail = None;
-                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or(anyhow!("error in subtracting total qty in order cancellation"))?;
-                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or(anyhow!("error is subtracting order qty in cancellation"))?;
+                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| anyhow!("error in subtracting total qty in order cancellation"))?;
+                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| anyhow!("error is subtracting order qty in cancellation"))?;
                                 self.bid.free_list.push(*existing_index.unwrap());
                                 return Ok(());
                             }
@@ -196,8 +196,8 @@ impl OrderBook {
                                         }           
                                     }
                                 self.bid.order_pool[*existing_index.unwrap()] = None;
-                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or(anyhow!("error in subtracting total qty in order cancellation"))?;
-                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or(anyhow!("error is subtracting order qty in cancellation"))?;
+                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| anyhow!("error in subtracting total qty in order cancellation"))?;
+                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| anyhow!("error is subtracting order qty in cancellation"))?;
                                 self.bid.free_list.push(*existing_index.unwrap());
                                 return Ok(()); 
                                 } else {
@@ -213,8 +213,8 @@ impl OrderBook {
                                         }
                                     }
                                     self.bid.order_pool[*existing_index.unwrap()] = None;
-                                    price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or(anyhow!("error in subtracting total qty in order cancellation"))?;
-                                    price_level.order_count = price_level.order_count.checked_sub(1).ok_or(anyhow!("error is subtracting order qty in cancellation"))?;
+                                    price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| anyhow!("error in subtracting total qty in order cancellation"))?;
+                                    price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| anyhow!("error is subtracting order qty in cancellation"))?;
                                     self.bid.free_list.push(*existing_index.unwrap());
                                     return Ok(());
                                 } else {
@@ -243,8 +243,8 @@ impl OrderBook {
                                     return Err(anyhow!("no next node found for deletion of middle node"));
                                 }
                                 self.bid.order_pool[*existing_index.unwrap()] = None;
-                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or(anyhow!("error in subtracting total qty in order cancellation"))?;
-                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or(anyhow!("error is subtracting order qty in cancellation"))?;
+                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| anyhow!("error in subtracting total qty in order cancellation"))?;
+                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| anyhow!("error is subtracting order qty in cancellation"))?;
                                 self.bid.free_list.push(*existing_index.unwrap());
                                 return Ok(());
                             }
@@ -277,8 +277,8 @@ impl OrderBook {
                                 self.ask.order_pool[*existing_index.unwrap()] = None;
                                 price_level.head = None;
                                 price_level.tail = None;
-                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or(anyhow!("error in subtracting total qty in order cancellation"))?;
-                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or(anyhow!("error is subtracting order qty in cancellation"))?;
+                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| anyhow!("error in subtracting total qty in order cancellation"))?;
+                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| anyhow!("error is subtracting order qty in cancellation"))?;
                                 self.ask.free_list.push(*existing_index.unwrap());
                                 return Ok(());
                             }
@@ -291,8 +291,8 @@ impl OrderBook {
                                         }           
                                     }
                                 self.ask.order_pool[*existing_index.unwrap()] = None;
-                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or(anyhow!("error in subtracting total qty in order cancellation"))?;
-                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or(anyhow!("error is subtracting order qty in cancellation"))?;
+                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| anyhow!("error in subtracting total qty in order cancellation"))?;
+                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| anyhow!("error is subtracting order qty in cancellation"))?;
                                 self.ask.free_list.push(*existing_index.unwrap());
                                 return Ok(()); 
                                 } else {
@@ -308,8 +308,8 @@ impl OrderBook {
                                         }
                                     }
                                     self.ask.order_pool[*existing_index.unwrap()] = None;
-                                    price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or(anyhow!("error in subtracting total qty in order cancellation"))?;
-                                    price_level.order_count = price_level.order_count.checked_sub(1).ok_or(anyhow!("error is subtracting order qty in cancellation"))?;
+                                    price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| anyhow!("error in subtracting total qty in order cancellation"))?;
+                                    price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| anyhow!("error is subtracting order qty in cancellation"))?;
                                     self.ask.free_list.push(*existing_index.unwrap());
                                     return Ok(());
                                 } else {
@@ -338,8 +338,8 @@ impl OrderBook {
                                     return Err(anyhow!("no next node found for deletion of middle node"));
                                 }
                                 self.ask.order_pool[*existing_index.unwrap()] = None;
-                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or(anyhow!("error in subtracting total qty in order cancellation"))?;
-                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or(anyhow!("error is subtracting order qty in cancellation"))?;
+                                price_level.total_quantity = price_level.total_quantity.checked_sub(old_quantity).ok_or_else(|| anyhow!("error in subtracting total qty in order cancellation"))?;
+                                price_level.order_count = price_level.order_count.checked_sub(1).ok_or_else(|| anyhow!("error is subtracting order qty in cancellation"))?;
                                 self.ask.free_list.push(*existing_index.unwrap());
                                 return Ok(());
                             }
